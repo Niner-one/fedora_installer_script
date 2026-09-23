@@ -1,21 +1,21 @@
 #!/bin/bash
 
-for b in brave-browser brave-origin brave firefox zen-browser vivaldi librewolf; do
-    if command -v "$b" >/dev/null 2>&1; then
-        exec "$b" "$@"
-        exit 0
+for browser in brave-browser brave-origin brave firefox zen-browser vivaldi librewolf; do
+    if command -v "$browser" >/dev/null 2>&1; then
+        exec "$browser" "$@"
     fi
 done
 
-if flatpak info com.brave.Browser >/dev/null 2>&1; then
+if command -v flatpak >/dev/null 2>&1 && flatpak info com.brave.Browser >/dev/null 2>&1; then
     exec flatpak run com.brave.Browser "$@"
-    exit 0
 fi
 
-if flatpak info com.vivaldi.Vivaldi >/dev/null 2>&1; then
+if command -v flatpak >/dev/null 2>&1 && flatpak info com.vivaldi.Vivaldi >/dev/null 2>&1; then
     exec flatpak run com.vivaldi.Vivaldi "$@"
-    exit 0
 fi
 
-## If nothing found
-notify-send "No browser found" "Install Brave, Firefox, Zen Browser, Vivaldi, or LibreWolf."
+if command -v notify-send >/dev/null 2>&1; then
+    notify-send "No browser found" "Install Brave, Firefox, Zen Browser, Vivaldi, or LibreWolf."
+fi
+echo "No browser found; install one or select a browser during installation." >&2
+exit 1

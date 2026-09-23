@@ -11,15 +11,45 @@ if [[ $EUID -ne 0 ]]; then
     exit 1
 fi
 
-if ! command -v dnf >/dev/null 2>&1; then
-    echo "ERROR: dnf was not found. This installer is intended for Fedora."
+if ! command -v dnf >/dev/null 2>&1 || ! command -v rpm >/dev/null 2>&1 || ! command -v sudo >/dev/null 2>&1; then
+    echo "ERROR: dnf, rpm and sudo are required on Fedora." >&2
+    exit 1
+fi
+
+FEDORA_VERSION=$(rpm -E '%fedora')
+if [[ ! "$FEDORA_VERSION" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: Could not determine the Fedora release from rpm." >&2
+    exit 1
+fi
+
+if [[ -n "${SUDO_USER:-}" && "$SUDO_USER" != root ]]; then
+    ACTUAL_USER="$SUDO_USER"
+else
+    ACTUAL_USER=$(logname 2>/dev/null || true)
+fi
+
+if [[ -z "$ACTUAL_USER" || "$ACTUAL_USER" == root ]] || ! id -u "$ACTUAL_USER" >/dev/null 2>&1; then
+    echo "ERROR: Run this script with sudo from your normal user account." >&2
+    exit 1
+fi
+
+ACTUAL_USER_HOME=$(getent passwd "$ACTUAL_USER" | cut -d: -f6)
+if [[ -z "$ACTUAL_USER_HOME" || ! -d "$ACTUAL_USER_HOME" ]]; then
+    echo "ERROR: Could not determine home directory for user '$ACTUAL_USER'." >&2
+    exit 1
+fi
+
+CONFIG_DIR="$ACTUAL_USER_HOME/.config"
+CONFIG_SOURCE_DIR="$ACTUAL_USER_HOME/config_files"
+if [[ ! -f "$CONFIG_SOURCE_DIR/hypr/hyprland.lua" ]]; then
+    echo "ERROR: Missing $CONFIG_SOURCE_DIR/hypr/hyprland.lua. Add the Hyprland dotfiles to ~/config_files before running the installer." >&2
     exit 1
 fi
 
 # --- Pre-flight confirmation ---
-echo "This script will install custom dot-files for Hyprland (trimmed/personal edition). Use at your own risk."
+echo "This script installs a Hyprland session and copies ~/config_files into ~/.config. Review the changes before proceeding."
 while true; do
-    read -r -p "Would you like to proceed? (y/n): " proceed
+    read -r -p "Would you like to proceed? (y/n): " proceed || exit 1
     case "$proceed" in
         y|Y|yes|YES)
             echo "Great! Proceeding with installation..."
@@ -38,7 +68,7 @@ done
 INSTALL_NVIDIA_OPTIONAL=0
 while true; do
     echo ""
-    read -r -p "Are you using an Nvidia GPU? (y/n): " nvidia_choice
+    read -r -p "Are you using an Nvidia GPU? (y/n): " nvidia_choice || exit 1
     case "$nvidia_choice" in
         y|Y|yes|YES)
             INSTALL_NVIDIA_OPTIONAL=1
@@ -57,6 +87,10 @@ while true; do
 done
 
 echo "Enabling COPR repository: lionheartp/Hyprland..."
+if ! dnf copr --help >/dev/null 2>&1; then
+    echo "ERROR: The dnf COPR plugin is required to enable the Hyprland repositories." >&2
+    exit 1
+fi
 if ! dnf -y copr enable lionheartp/Hyprland; then
     echo "ERROR: Failed to enable COPR repository lionheartp/Hyprland."
     exit 1
@@ -76,9 +110,15 @@ fi
 
 echo "Installing RPM Fusion repositories..."
 if ! dnf -y install \
-    "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm" \
-    "https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm"; then
+    "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$FEDORA_VERSION.noarch.rpm" \
+    "https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$FEDORA_VERSION.noarch.rpm"; then
     echo "ERROR: Failed to install RPM Fusion repositories."
+    exit 1
+fi
+
+echo "Updating system packages..."
+if ! dnf upgrade -y; then
+    echo "ERROR: Failed to update system packages. Aborting installation." >&2
     exit 1
 fi
 
@@ -112,7 +152,7 @@ while true; do
     for flatpak_package in "${FLATPAK_OPTIONAL_PACKAGES[@]}"; do
         echo "  - $flatpak_package"
     done
-    read -r -p "Do you want to install optional Flatpak packages? (y/n): " flatpak_choice
+    read -r -p "Do you want to install optional Flatpak packages? (y/n): " flatpak_choice || exit 1
     case "$flatpak_choice" in
         y|Y|yes|YES)
             INSTALL_FLATPAK_OPTIONAL_PACKAGES=1
@@ -131,8 +171,6 @@ while true; do
 done
 
 # --- Browser selection ---
-# You said you'll install your browser yourself - just pick 0 here. The prompt
-# is left in (rather than deleted) in case you ever want it on a future machine.
 BROWSER_CHOICE="none"
 while true; do
     echo ""
@@ -141,7 +179,7 @@ while true; do
     echo "  1. Firefox"
     echo "  2. Brave"
     echo "  3. Vivaldi"
-    read -r -p "Choose browser option (0-3): " browser_choice
+    read -r -p "Choose browser option (0-3): " browser_choice || exit 1
     case "$browser_choice" in
         0|"")
             BROWSER_CHOICE="none"
@@ -175,44 +213,11 @@ if ! dnf in noctalia-hyprland-meta -y; then
     exit 1
 fi
 
-# --- Configuration ---
-# Get the actual user running the script (not root)
-if [ -n "$SUDO_USER" ] && [ "$SUDO_USER" != "root" ]; then
-    ACTUAL_USER="$SUDO_USER"
-else
-    ACTUAL_USER=$(logname 2>/dev/null)
-fi
-
-if [ -z "$ACTUAL_USER" ] || [ "$ACTUAL_USER" = "root" ]; then
-    echo "ERROR: Could not determine a non-root target user. Run this script with sudo from your normal user account."
-    exit 1
-fi
-
-ACTUAL_USER_HOME=$(getent passwd "$ACTUAL_USER" | cut -d: -f6)
-if [ -z "$ACTUAL_USER_HOME" ] || [ ! -d "$ACTUAL_USER_HOME" ]; then
-    echo "ERROR: Could not determine home directory for user '$ACTUAL_USER'."
-    exit 1
-fi
-
-REPO_DIR="$SCRIPT_DIR"
-CONFIG_DIR="$ACTUAL_USER_HOME/.config"
-
-# Validate repo directory
-if [ ! -d "$REPO_DIR/.config" ]; then
-    echo "ERROR: Script must be run from the repository root directory."
-    exit 1
-fi
-
-if [ ! -d "$REPO_DIR/.config/hypr" ]; then
-    echo "ERROR: Could not find the Hyprland config directory inside your repository at '$REPO_DIR/.config/hypr'."
-    exit 1
-fi
-
 # --- Gaming package selection ---
 INSTALL_GAMING_PACKAGES=0
 while true; do
     echo ""
-    read -r -p "Do you want to install gaming packages (steam, mangohud, wine, winetricks)? (y/n): " gaming_choice
+    read -r -p "Do you want to install gaming packages (steam, mangohud, wine, winetricks)? (y/n): " gaming_choice || exit 1
     case "$gaming_choice" in
         y|Y|yes|YES)
             INSTALL_GAMING_PACKAGES=1
@@ -234,7 +239,7 @@ done
 INSTALL_BLUETOOTH_PACKAGES=0
 while true; do
     echo ""
-    read -r -p "Do you want to install Bluetooth packages and enable the Bluetooth service? (y/n): " bluetooth_choice
+    read -r -p "Do you want to install Bluetooth packages and enable the Bluetooth service? (y/n): " bluetooth_choice || exit 1
     case "$bluetooth_choice" in
         y|Y|yes|YES)
             INSTALL_BLUETOOTH_PACKAGES=1
@@ -252,17 +257,13 @@ while true; do
     esac
 done
 
-# NOTE: The EasyEffects / Dolby audio prompt from the upstream script has been
-# removed entirely on purpose - you said you don't use either, so there is
-# nothing to add to PACKAGES and no Dolby PipeWire profile step to run.
-
 # Define the list of core packages to install using dnf.
 # Some packages are provided by COPR or third-party repositories.
 PACKAGES=(
     # --- Core session / login (required for Hyprland + Noctalia Greeter to boot) ---
     dbus                        # D-Bus for greetd / greeter session plumbing
     polkit                      # Polkit backend service (decides what's allowed)
-    xfce-polkit                 # Polkit authentication agent (shows the prompt) - matches your live startup.lua
+    xfce-polkit                 # Polkit authentication agent
     accountsservice              # AccountsService for greeter avatars
     greetd                       # Login manager daemon for Noctalia Greeter
     noctalia-greeter              # Noctalia login greeter for greetd
@@ -274,27 +275,27 @@ PACKAGES=(
     mesa-vulkan-drivers           # Vulkan drivers used by wlroots stack
     qt6-qtbase                    # Qt6 base libraries and tools
     qt6-qtwebsockets               # Websocket support (used by Noctalia)
-    qt6ct                          # Qt platform theme - referenced directly in startup.lua's env table
+    qt6ct                          # Qt platform theme
     matugen                        # Noctalia's wallpaper-based color-scheme generator
     xdg-user-dirs                   # Manage user directories (~/Downloads, ~/Pictures, etc.)
 
-    # --- Power management (laptop-relevant, always kept) ---
+    # --- Power management ---
     power-profiles-daemon            # Power profile switching
     upower                            # Battery/power status
     cpupower                          # CPU frequency scaling utilities
 
-    # --- Confirmed required by your live keybind.lua / startup.lua / satty.sh ---
+    # --- Desktop applications and screenshot tools ---
     wl-clip-persist                    # Clipboard persistence - started in exec_once
     thunar                              # File manager - SUPER+E
     grim                                  # Screenshot capture - used by both hyprshot and satty.sh
     slurp                                  # Region selector - used by both hyprshot and satty.sh
     hyprshot                                # SUPER+PrintScreen / Alt+PrintScreen / Shift+PrintScreen
-    kitty                                    # Terminal itself - SUPER+Return (NOT in the upstream array, added here)
+    kitty                                    # Terminal
     kitty-shell-integration                   # Kitty shell integration
     kitty-terminfo                              # Kitty terminfo
-    jq                                            # Required by SUPER+SHIFT+CTRL+arrow move/swap binds (NOT in the upstream array, added here)
+    jq                                            # JSON parser for Satty release metadata
 
-    # --- Your explicit keeps ---
+    # --- Utilities ---
     unrar                            # RAR archive support
     unzip                             # ZIP archive support
     p7zip                              # 7z archive support
@@ -305,9 +306,9 @@ PACKAGES=(
     os-prober                               # OS prober for GRUB (dual-boot detection)
     pavucontrol                              # PulseAudio/PipeWire volume control
 
-    # --- Not explicitly discussed during trimming - kept by default, see chat notes ---
-    nwg-look                          # GTK look-and-feel config - README-recommended for theming
-    nwg-displays                       # Monitor layout tool - README-recommended for hyprland.conf setup
+    # --- Media and desktop utilities ---
+    nwg-look                          # GTK look-and-feel config
+    nwg-displays                       # Monitor layout tool
     gst-plugins-good                    # GStreamer plugins (broad codec/media support)
     gst-plugins-ugly                     # GStreamer plugins (nonfree codecs, from RPM Fusion)
     gst-libav                             # GStreamer plugins (ffmpeg-backed codecs)
@@ -315,65 +316,10 @@ PACKAGES=(
     google-noto-emoji-fonts                 # Emoji fallback font
 )
 
-# --- Color Functions ---
-disable_colors() {
-    unset ALL_OFF BOLD BLUE GREEN RED YELLOW CYAN MAGENTA
-}
-
-enable_colors() {
-    if tput setaf 0 &>/dev/null; then
-        ALL_OFF="$(tput sgr0)"
-        BOLD="$(tput bold)"
-        RED="${BOLD}$(tput setaf 1)"
-        GREEN="${BOLD}$(tput setaf 2)"
-        YELLOW="${BOLD}$(tput setaf 3)"
-        BLUE="${BOLD}$(tput setaf 4)"
-        MAGENTA="${BOLD}$(tput setaf 5)"
-        CYAN="${BOLD}$(tput setaf 6)"
-    else
-        ALL_OFF="\e[0m"
-        BOLD="\e[1m"
-        RED="${BOLD}\e[31m"
-        GREEN="${BOLD}\e[32m"
-        YELLOW="${BOLD}\e[33m"
-        BLUE="${BOLD}\e[34m"
-        MAGENTA="${BOLD}\e[35m"
-        CYAN="${BOLD}\e[36m"
-    fi
-    readonly ALL_OFF BOLD BLUE GREEN RED YELLOW CYAN MAGENTA
-}
-
-if [[ -t 2 ]]; then
-    enable_colors
-else
-    disable_colors
-fi
-
 # --- Main Installation Functions ---
 
 install_dnf_packages() {
-    local installable_packages=()
-    local unavailable_packages=()
-    local pkg
-
-    for pkg in "$@"; do
-        if rpm -q "$pkg" >/dev/null 2>&1 || dnf -q list --available "$pkg" >/dev/null 2>&1; then
-            installable_packages+=("$pkg")
-        else
-            unavailable_packages+=("$pkg")
-        fi
-    done
-
-    if [ ${#unavailable_packages[@]} -gt 0 ]; then
-        echo "Skipping unavailable packages: ${unavailable_packages[*]}"
-    fi
-
-    if [ ${#installable_packages[@]} -eq 0 ]; then
-        echo "ERROR: No installable packages were found in the provided package list."
-        return 1
-    fi
-
-    dnf install -y "${installable_packages[@]}"
+    dnf install -y "$@"
 }
 
 install_gaming_packages() {
@@ -433,26 +379,30 @@ setup_noctalia_greeter() {
     local greeter_user="greeter"
     local session_bin="/usr/bin/noctalia-greeter-session"
 
-    if command -v noctalia-greeter-session >/dev/null 2>&1; then
-        session_bin=$(command -v noctalia-greeter-session)
+    if ! command -v noctalia-greeter-session >/dev/null 2>&1; then
+        echo "ERROR: noctalia-greeter-session is missing; refusing to configure greetd." >&2
+        return 1
     fi
+    session_bin=$(command -v noctalia-greeter-session)
 
     if ! id -u "$greeter_user" >/dev/null 2>&1; then
         echo "Creating greeter user '$greeter_user'..."
-        useradd -r -s /usr/bin/nologin -d /var/lib/noctalia-greeter "$greeter_user"
+        useradd -r -s /usr/bin/nologin -d /var/lib/noctalia-greeter "$greeter_user" || return 1
     fi
 
     echo "Preparing greeter state directory..."
-    mkdir -p /var/lib/noctalia-greeter
-    chown -R "$greeter_user:$greeter_user" /var/lib/noctalia-greeter
+    mkdir -p /var/lib/noctalia-greeter || return 1
+    chown -R "$greeter_user:$greeter_user" /var/lib/noctalia-greeter || return 1
 
     if [ -f "$greetd_config_file" ]; then
-        cp -a "$greetd_config_file" "$greetd_config_file.bak.$(date +%s)"
+        cp -a --backup=numbered "$greetd_config_file" "$greetd_config_file.bak" || return 1
     fi
 
     echo "Writing greetd configuration to $greetd_config_file..."
-    mkdir -p /etc/greetd
-    cat > "$greetd_config_file" <<EOF
+    mkdir -p /etc/greetd || return 1
+    local config_tmp
+    config_tmp=$(mktemp /etc/greetd/config.toml.XXXXXXXX) || return 1
+    if ! cat > "$config_tmp" <<EOF
 [terminal]
 vt = 1
 
@@ -460,6 +410,11 @@ vt = 1
 command = "$session_bin"
 user = "$greeter_user"
 EOF
+    then
+        rm -f "$config_tmp"
+        return 1
+    fi
+    mv -f "$config_tmp" "$greetd_config_file" || { rm -f "$config_tmp"; return 1; }
 
     if [ -x /usr/share/noctalia-greeter/setup_greetd_pam.sh ]; then
         echo "Configuring greetd PAM integration for Noctalia Greeter..."
@@ -474,18 +429,18 @@ EOF
 enable_greetd_service() {
     echo -e "\n--- Display Manager Setup ---"
     echo "Enabling greetd service..."
-    if systemctl enable greetd; then
-        echo "greetd service enabled."
-    else
-        echo "Warning: Failed to enable greetd.service."
+    if ! systemctl enable greetd; then
+        echo "ERROR: Failed to enable greetd.service; boot target will not be changed." >&2
+        return 1
     fi
+    echo "greetd service enabled."
 
     echo "Setting default boot target to graphical.target..."
-    if systemctl set-default graphical.target; then
-        echo "Default target set to graphical.target."
-    else
-        echo "Warning: Failed to set default target to graphical.target."
+    if ! systemctl set-default graphical.target; then
+        echo "ERROR: Failed to set the default boot target." >&2
+        return 1
     fi
+    echo "Default target set to graphical.target."
 
     local current_target
     current_target=$(systemctl get-default 2>/dev/null || true)
@@ -493,12 +448,6 @@ enable_greetd_service() {
         echo "Current default target: $current_target"
     fi
 }
-
-# NOTE: install_flatpak_optional_packages, install_browser_choice,
-# install_satty_flatpak, and install_starship are defined here at top level.
-# In the upstream script these four functions were (accidentally, as far as we
-# can tell) defined *inside* deploy_configs()'s success branch, meaning they
-# didn't exist yet if that cp ever failed. Moved out here so they always exist.
 
 install_flatpak_optional_packages() {
     if [ "$INSTALL_FLATPAK_OPTIONAL_PACKAGES" -ne 1 ]; then
@@ -566,9 +515,7 @@ install_browser_choice() {
 
 install_satty_flatpak() {
     echo -e "\n--- Satty Flatpak Installation ---"
-    echo "(Fedora ships no native satty package in its own repos; satty.sh already"
-    echo " auto-detects a native binary first and falls back to this Flatpak, so"
-    echo " installing it here keeps SUPER+A working either way.)"
+    echo "Installing the Satty Flatpak from its GitHub release."
 
     if ! ensure_flatpak_available; then
         return 1
@@ -581,7 +528,6 @@ install_satty_flatpak() {
 
     local release_api="https://api.github.com/repos/Satty-org/Satty/releases/latest"
     local release_json
-    local asset_name
     local download_url
     local tmp_dir
     local bundle_path
@@ -592,19 +538,18 @@ install_satty_flatpak() {
         return 0
     fi
 
-    asset_name=$(printf '%s\n' "$release_json" | sed -n 's/.*"name": "\(satty-v[^"]*\.flatpak\)".*/\1/p' | head -n 1)
-    download_url=$(printf '%s\n' "$release_json" | sed -n 's/.*"browser_download_url": "\(https:[^"]*satty-v[^"]*\.flatpak\)".*/\1/p' | head -n 1)
+    download_url=$(printf '%s\n' "$release_json" | jq -r '[.assets[]? | select(.name | test("^satty-v[^/]+[.]flatpak$")) | .browser_download_url | select(test("^https://github[.]com/Satty-org/Satty/releases/download/[^/]+/satty-v[^/]+[.]flatpak$"))][0] // empty')
 
-    if [ -z "$asset_name" ] || [ -z "$download_url" ]; then
+    if [ -z "$download_url" ]; then
         echo "Warning: Could not find a Satty Flatpak asset in the latest release."
         return 0
     fi
 
-    tmp_dir=$(mktemp -d)
-    bundle_path="$tmp_dir/$asset_name"
+    tmp_dir=$(mktemp -d) || return 1
+    bundle_path="$tmp_dir/${download_url##*/}"
 
-    echo "Downloading $asset_name..."
-    if ! curl -fL "$download_url" -o "$bundle_path"; then
+    echo "Downloading ${bundle_path##*/}..."
+    if ! curl -fL --retry 2 --connect-timeout 15 --max-time 180 "$download_url" -o "$bundle_path"; then
         echo "Warning: Failed to download Satty Flatpak bundle."
         rm -rf "$tmp_dir"
         return 0
@@ -624,74 +569,59 @@ install_starship() {
     echo -e "\n--- Starship Installation ---"
     echo "Installing Starship prompt..."
 
-    if curl -sS https://starship.rs/install.sh | sh -s -- -y; then
+    if dnf install -y starship; then
         echo "Starship installed successfully."
     else
         echo "Warning: Starship installation failed."
     fi
 }
 
-# Deploy configuration files from repo/.config to ~/.config
-#
-# IMPORTANT if you're re-running this on your existing laptop rather than a
-# fresh install: this copies THIS REPO'S .config/hypr over your live
-# ~/.config/hypr (after backing the old one up with a .bak.<timestamp>
-# suffix). If your live startup.lua/keybind.lua have hand edits you want to
-# keep (e.g. the two exec_once lines you removed for gnome-keyring and
-# easyeffects), copy your live files into $REPO_DIR/.config/hypr/ BEFORE
-# running this script, or this step will overwrite them with the repo's
-# template and you'll need to reapply your edits from the backup.
+# Deploy configuration files from ~/config_files to ~/.config, backing up originals.
 deploy_configs() {
     echo "Deploying configuration files..."
 
-    CONFIG_SOURCE_ROOT="$REPO_DIR/.config"
+    local config_source_root="$CONFIG_SOURCE_DIR"
+    local stage_dir item name target backup
 
-    if [ ! -d "$CONFIG_SOURCE_ROOT" ]; then
-        echo "FATAL ERROR: Could not find the '.config' directory inside your repository at '$REPO_DIR'."
-        return
+    sudo -u "$ACTUAL_USER" mkdir -p "$CONFIG_DIR" || return 1
+    stage_dir=$(sudo -u "$ACTUAL_USER" mktemp -d "$CONFIG_DIR/.installer-stage.XXXXXXXX") || return 1
+    if ! sudo -u "$ACTUAL_USER" cp -a "$config_source_root/." "$stage_dir/"; then
+        echo "ERROR: Failed to stage configuration files." >&2
+        sudo -u "$ACTUAL_USER" rm -rf -- "$stage_dir"
+        return 1
     fi
 
-    # Ensure target .config directory exists
-    sudo -u "$ACTUAL_USER" mkdir -p "$CONFIG_DIR"
-
-    # Back up any existing configs that would be overwritten
-    BACKUP_TIMESTAMP=$(date +%s)
-    echo "Backing up existing configuration files..."
-
-    for item in "$CONFIG_SOURCE_ROOT"/*; do
-        name=$(basename "$item")
+    for item in "$stage_dir"/* "$stage_dir"/.[!.]* "$stage_dir"/..?*; do
+        [[ -e "$item" || -L "$item" ]] || continue
+        name=${item##*/}
         target="$CONFIG_DIR/$name"
-        if [ "$name" = "hypr" ]; then
-            continue
+        backup=""
+        if [[ -e "$target" || -L "$target" ]]; then
+            backup="$target.bak.$(date +%s)"
+            if [[ -e "$backup" || -L "$backup" ]]; then
+                echo "ERROR: Backup path already exists: $backup" >&2
+                sudo -u "$ACTUAL_USER" rm -rf -- "$stage_dir"
+                return 1
+            fi
+            if ! sudo -u "$ACTUAL_USER" mv -- "$target" "$backup"; then
+                sudo -u "$ACTUAL_USER" rm -rf -- "$stage_dir"
+                return 1
+            fi
+            echo "Backed up $name to ${backup##*/}."
         fi
-
-        if [ -e "$target" ] || [ -L "$target" ]; then
-            echo "  -> Backing up: $name to $name.bak.$BACKUP_TIMESTAMP"
-            mv "$target" "$CONFIG_DIR/$name.bak.$BACKUP_TIMESTAMP"
+        if ! sudo -u "$ACTUAL_USER" mv -- "$item" "$target"; then
+            if [[ -n "$backup" ]]; then
+                sudo -u "$ACTUAL_USER" mv -- "$backup" "$target"
+            fi
+            sudo -u "$ACTUAL_USER" rm -rf -- "$stage_dir"
+            return 1
         fi
     done
-
-    if [ -e "$CONFIG_DIR/hypr" ] || [ -L "$CONFIG_DIR/hypr" ]; then
-        echo "  -> Backing up: hypr to hypr.bak.$BACKUP_TIMESTAMP"
-        mv "$CONFIG_DIR/hypr" "$CONFIG_DIR/hypr.bak.$BACKUP_TIMESTAMP"
-    fi
-
-    # Copy all configuration files from repo/.config to ~/.config
-    echo "Copying configuration files from $CONFIG_SOURCE_ROOT to $CONFIG_DIR..."
-    cp -rf "$CONFIG_SOURCE_ROOT"/* "$CONFIG_DIR"/
-
-    if [ $? -eq 0 ]; then
-        echo "Configuration files copied successfully!"
-        chown -R "$ACTUAL_USER:$ACTUAL_USER" "$CONFIG_DIR"
-    else
-        echo "ERROR: Failed to copy configuration files."
-    fi
+    sudo -u "$ACTUAL_USER" rmdir -- "$stage_dir" || return 1
+    echo "Configuration files deployed successfully."
 }
 
-# Updates the polkit-agent startup line if it's still on the old
-# polkit-gnome pattern. If your startup.lua already has the xfce-polkit
-# line (which yours does), this is a no-op and says so instead of printing
-# a confusing "not found" warning.
+# Updates the polkit-agent startup line if it's still on the old polkit-gnome pattern.
 update_hypr_startup_config() {
     local startup_file="$ACTUAL_USER_HOME/.config/hypr/startup.lua"
     local polkit_gnome_match='polkit-gnome-authentication-agent-1'
@@ -706,7 +636,7 @@ update_hypr_startup_config() {
         echo "startup.lua already starts xfce-polkit - nothing to change."
     elif grep -qF "$polkit_gnome_match" "$startup_file"; then
         echo "Updating Hyprland startup command in $startup_file..."
-        sed -i "/polkit-gnome-authentication-agent-1/c\\${xfce_polkit_line}" "$startup_file"
+        sudo -u "$ACTUAL_USER" sed -i "/polkit-gnome-authentication-agent-1/c\\${xfce_polkit_line}" "$startup_file"
         if grep -qF "/usr/libexec/xfce-polkit" "$startup_file"; then
             echo "Hyprland xfce-polkit startup command updated successfully."
         else
@@ -720,28 +650,22 @@ update_hypr_startup_config() {
     if [ "$INSTALL_NVIDIA_OPTIONAL" -eq 1 ]; then
         if grep -qF 'local enable_nvidia_optional = false' "$startup_file"; then
             echo "Enabling Nvidia-specific Hyprland options in $startup_file..."
-            sed -i 's|^local enable_nvidia_optional = false$|local enable_nvidia_optional = true|' "$startup_file"
+            sudo -u "$ACTUAL_USER" sed -i 's|^local enable_nvidia_optional = false$|local enable_nvidia_optional = true|' "$startup_file"
         else
             echo "Warning: Expected Nvidia toggle line not found in '$startup_file'."
         fi
     fi
 }
 
-# NOTE: The upstream update_hypr_keybind_config() function (which rewrote an
-# inline "| satty --filename -" call into a flatpak run command) has been
-# removed. Your Satty invocation lives in Scripts/satty.sh, which already
-# auto-detects native vs. Flatpak satty on its own - there's nothing left in
-# keybind.lua for that function to patch.
-
 # Set executable permissions for scripts
 set_permissions() {
-    SCRIPTS_PATH="$ACTUAL_USER_HOME/.config/hypr/Scripts"
+    local scripts_path="$ACTUAL_USER_HOME/.config/hypr/Scripts"
 
-    if [ -d "$SCRIPTS_PATH" ]; then
+    if [ -d "$scripts_path" ]; then
         echo "Setting execution permissions for scripts..."
-        find "$SCRIPTS_PATH" -type f -exec chmod +x {} \;
+        sudo -u "$ACTUAL_USER" find "$scripts_path" -type f -exec chmod +x {} +
     else
-        echo "Warning: Hyprland scripts directory '$SCRIPTS_PATH' not found."
+        echo "Warning: Hyprland scripts directory '$scripts_path' not found."
     fi
 }
 
@@ -749,9 +673,12 @@ set_permissions() {
 set_default_file_manager() {
     echo ""
     echo "Setting Thunar as default file manager..."
-    sudo -u "$ACTUAL_USER" mkdir -p "$ACTUAL_USER_HOME/.config"
-    sudo -u "$ACTUAL_USER" xdg-mime default thunar.desktop inode/directory application/x-gnome-saved-search
-    echo "Default file manager set to Thunar."
+    if sudo -u "$ACTUAL_USER" mkdir -p "$ACTUAL_USER_HOME/.config" &&
+        sudo -u "$ACTUAL_USER" xdg-mime default thunar.desktop inode/directory application/x-gnome-saved-search; then
+        echo "Default file manager set to Thunar."
+    else
+        echo "Warning: Failed to set Thunar as default file manager." >&2
+    fi
 }
 
 # Create GTK bookmarks for Thunar
@@ -780,32 +707,31 @@ EOF
 copy_backup_configs() {
     echo -e "\n--- Optional: Copy Backup Configs ---"
 
-    local config_source="$REPO_DIR/backup/.config"
+    local config_source="$SCRIPT_DIR/backup/.config"
 
     if [[ ! -d "$config_source" ]]; then
-        echo "No backup folder found at $REPO_DIR/backup/.config"
+        echo "No backup folder found at $SCRIPT_DIR/backup/.config"
         echo "Skipping backup config restoration."
         return 0
     fi
 
     echo "Found backup configs at: $config_source"
-    read -r -p "Do you want to restore config files from backup? (y/N): " backup_response
+    read -r -p "Do you want to restore config files from backup? (y/N): " backup_response || return 1
 
     if [[ "$backup_response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
         echo "Copying config files from backup to $CONFIG_DIR..."
-        cp -rf "$config_source"/* "$CONFIG_DIR"/
+        sudo -u "$ACTUAL_USER" cp -R "$config_source/." "$CONFIG_DIR/"
 
         if [ $? -eq 0 ]; then
             echo "Config files copied successfully!"
-            chown -R "$ACTUAL_USER:$ACTUAL_USER" "$CONFIG_DIR"
-
             if [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
                 echo "Detected Hyprland environment. Reloading Hyprland to apply new configs..."
                 hyprctl reload 2>/dev/null || echo "Note: Could not reload Hyprland. You may need to restart it manually."
                 sleep 2
             fi
         else
-            echo "ERROR: Failed to copy backup config files."
+            echo "ERROR: Failed to copy backup config files." >&2
+            return 1
         fi
     else
         echo "Skipping backup config restoration."
@@ -851,8 +777,7 @@ fi
 install_gaming_packages
 install_bluetooth_packages
 enable_accounts_daemon
-setup_noctalia_greeter
-enable_greetd_service
+setup_noctalia_greeter || exit 1
 
 echo "Updating user directories..."
 sudo -u "$ACTUAL_USER" xdg-user-dirs-update
@@ -866,33 +791,23 @@ echo "--------------------------------------------------------"
 echo "Proceeding with post-install configuration..."
 echo "--------------------------------------------------------"
 
-echo "Updating system packages before installing Noctalia..."
-dnf upgrade -y
-
-if [ $? -ne 0 ]; then
-    echo "ERROR: Failed to update system packages. Aborting installation."
-    exit 1
-fi
-
-set_default_file_manager
-deploy_configs
-copy_backup_configs
+deploy_configs || { echo "ERROR: Configuration deployment failed; installation stopped." >&2; exit 1; }
+copy_backup_configs || { echo "ERROR: Backup config restoration failed; installation stopped." >&2; exit 1; }
 update_hypr_startup_config
 create_thunar_bookmarks
 set_permissions
+set_default_file_manager
+enable_greetd_service || exit 1
 install_flatpak_optional_packages
 install_browser_choice
 install_satty_flatpak
 install_starship
 post_install_hyprland_checks
 
-sudo -u "$ACTUAL_USER" xdg-mime default thunar.desktop inode/directory
-sudo -u "$ACTUAL_USER" xdg-mime default thunar.desktop application/x-gnome-saved-search
-
 echo ""
 echo "Installation complete! Time to reboot."
 while true; do
-    read -r -p "Would you like to reboot now? (y/n): " reboot_choice
+    read -r -p "Would you like to reboot now? (y/n): " reboot_choice || exit 1
     case "$reboot_choice" in
         y|Y|yes|YES)
             echo "Rebooting now..."
