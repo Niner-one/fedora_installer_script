@@ -3,13 +3,17 @@
 sleep 0.05
 
 ## Fetch active workspace and monitor
-ACTIVE_WS_JSON=$(hyprctl activeworkspace -j)
-CURRENT_ID=$(echo "$ACTIVE_WS_JSON" | jq -r '.id')
-FOCUSED_MONITOR_NAME=$(echo "$ACTIVE_WS_JSON" | jq -r '.monitor')
-FOCUSED_MONITOR_ID=$(echo "$ACTIVE_WS_JSON" | jq -r '.monitorID')
+ACTIVE_WS_JSON=$(hyprctl activeworkspace -j) || exit 1
+CURRENT_ID=$(jq -er '.id | select(type == "number")' <<< "$ACTIVE_WS_JSON") || exit 1
+FOCUSED_MONITOR_NAME=$(jq -er '.monitor | select(type == "string")' <<< "$ACTIVE_WS_JSON") || exit 1
+FOCUSED_MONITOR_ID=$(jq -er '.monitorID | select(type == "number")' <<< "$ACTIVE_WS_JSON") || exit 1
 
 ## Per-monitor debouncing
-LOCK_FILE="/tmp/hypr-workspace-next-${FOCUSED_MONITOR_ID}.lock"
+if [[ ! -d "${XDG_RUNTIME_DIR:-}" ]]; then
+    echo "XDG_RUNTIME_DIR is unavailable; cannot debounce workspace switching." >&2
+    exit 1
+fi
+LOCK_FILE="$XDG_RUNTIME_DIR/hypr-workspace-next-${FOCUSED_MONITOR_ID}.lock"
 NOW_MS=$(date +%s%3N)
 
 if [ -f "$LOCK_FILE" ]; then
@@ -37,12 +41,12 @@ fi
 
 ## Get active workspace IDs assigned to current monitor
 ACTIVE_IDS_LIST=$(hyprctl workspaces -j | \
-    jq -r '.[] | select(.monitor == "'"$FOCUSED_MONITOR_NAME"'" or .monitorID == '$FOCUSED_MONITOR_ID') | select(.windows > 0) | .id' | \
+    jq -r --arg monitor "$FOCUSED_MONITOR_NAME" --argjson monitor_id "$FOCUSED_MONITOR_ID" '.[] | select(.monitor == $monitor or .monitorID == $monitor_id) | select(.windows > 0) | .id' | \
     sort -n)
 
 ## Extract workspace IDs from workspace rules for current monitor
 RULE_IDS_LIST=$(hyprctl workspacerules -j 2>/dev/null | \
-    jq -r '.[] | select(.monitor == "'"$FOCUSED_MONITOR_NAME"'") | .workspaceString' | \
+    jq -r --arg monitor "$FOCUSED_MONITOR_NAME" '.[] | select(.monitor == $monitor) | .workspaceString' | \
     grep -E '^[0-9]+$' | sort -n)
 
 ## Combine active workspaces and workspace rules for current monitor
