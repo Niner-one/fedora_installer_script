@@ -287,6 +287,17 @@ PACKAGES=(
     # --- Desktop applications and screenshot tools ---
     wl-clip-persist                    # Clipboard persistence - started in exec_once
     thunar                              # File manager - SUPER+E
+    thunar-media-tags-plugin		  # Media tags plugin for Thunar
+    thunar-shares-plugin      		# Shares plugin for Thunar
+    thunar-vcs-plugin         		# VCS integration plugin for Thunar
+    thunar-volman             		# Volume management plugin for Thunar
+    tumbler				# Thumbnailer
+    libopenraw				# lib for tumbler:
+    libgsf
+    poppler-glib
+    ffmpegthumbnailer
+    freetype
+    libgepub
     grim                                  # Screenshot capture - used by both hyprshot and satty.sh
     slurp                                  # Region selector - used by both hyprshot and satty.sh
     hyprshot                                # SUPER+PrintScreen / Alt+PrintScreen / Shift+PrintScreen
@@ -294,6 +305,8 @@ PACKAGES=(
     kitty-shell-integration                   # Kitty shell integration
     kitty-terminfo                              # Kitty terminfo
     jq                                            # JSON parser for Satty release metadata
+    loupe					# Image viewer
+    vlc						# It't fucking VLC
 
     # --- Utilities ---
     unrar                            # RAR archive support
@@ -305,13 +318,20 @@ PACKAGES=(
     grub2-tools                            # GRUB tooling
     os-prober                               # OS prober for GRUB (dual-boot detection)
     pavucontrol                              # PulseAudio/PipeWire volume control
+    gedit					#Gnome Advanced Text Editor
+    gnome-disk-utility				#Disk Managment
+    gvfs                      			# Needed for Thunar to see drives
+    gvfs-afc                  			# Apple Device Support
+    gvfs-mtp                  			# Android/MTP Device Support
+    gvfs-smb                  			# SMB Support 
+    exfatprogs                			# exFAT filesystem support
 
     # --- Media and desktop utilities ---
     nwg-look                          # GTK look-and-feel config
     nwg-displays                       # Monitor layout tool
-    gst-plugins-good                    # GStreamer plugins (broad codec/media support)
-    gst-plugins-ugly                     # GStreamer plugins (nonfree codecs, from RPM Fusion)
-    gst-libav                             # GStreamer plugins (ffmpeg-backed codecs)
+    gstreamer1-plugins-good              # GStreamer plugins (broad codec/media support)
+    gstreamer1-plugins-ugly               # GStreamer plugins (nonfree codecs, from RPM Fusion)
+    gstreamer1-plugin-libav                # GStreamer plugins (ffmpeg-backed codecs)
     dejavu-sans-fonts                      # Fallback font - kept to avoid missing-glyph rendering
     google-noto-emoji-fonts                 # Emoji fallback font
 )
