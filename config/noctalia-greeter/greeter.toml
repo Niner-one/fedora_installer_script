@@ -1,0 +1,49 @@
+#noctalia greeter config
+
+[session]
+default = "Hyprland"
+
+[user]
+default = "user"
+
+[appearance]
+password_style = "default"
+hide_logo = true
+power_buttons_position = "top-right"
+scheme_selector_position = "hidden"
+theme_mode = "dark"
+scheme = "Synced"
+
+[appearance.palette]
+primary = "#d3d3d3" #password box outline
+on_primary = "#000000" #submit pw box infill
+secondary = "#000000" #power option infill
+on_secondary = "#d3d3d3" #power option symbols
+tertiary = "#000000" #?
+on_tertiary = "#000000" #?
+error = "#9D3434" #shutdown hover
+on_error = "#000000" #shutdown hover icon
+surface = "#000000" #power options and password/session box infill
+on_surface = "#d3d3d3" #logo/name and session name
+surface_variant = "#000000" #session outer box infill and theme selection
+on_surface_variant = "#d3d3d3" #theme selector logo
+outline = "#d3d3d3" #all outlines
+shadow = "#000000" #?
+hover = "#000000" #hover arrow
+on_hover = "#d3d3d3" #infill on hover
+
+[appearance.wallpaper]
+#path = "/var/lib/noctalia-greeter/image.png" #Image need a greeter:greeter chown
+#fill_color = "#000000"
+fill_mode = "fit"
+
+[idle]
+timeout = 300
+
+[keyboard]
+layout = "ee"
+variant = "qwerty"
+
+[auth]
+allow_empty_password = false
+request_timeout = 60
