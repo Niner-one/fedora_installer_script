@@ -1,0 +1,5 @@
+sudo dnf install dnf-plugins-core
+
+sudo dnf config-manager addrepo --from-repofile=https://brave-browser-rpm-nightly.s3.brave.com/brave-browser-nightly.repo
+
+sudo dnf install brave-browser-nightly
