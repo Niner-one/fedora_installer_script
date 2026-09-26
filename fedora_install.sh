@@ -298,8 +298,6 @@ PACKAGES=(
     wl-clip-persist                    # Clipboard persistence - started in exec_once
     thunar                              # File manager - SUPER+E
     thunar-media-tags-plugin            # Media tags plugin for Thunar
-    thunar-shares-plugin                # Shares plugin for Thunar
-    thunar-vcs-plugin                   # VCS integration plugin for Thunar
     thunar-volman                       # Volume management plugin for Thunar
     tumbler                             # Thumbnailer
     libopenraw                          # RAW image support for Tumbler
