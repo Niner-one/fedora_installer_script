@@ -42,6 +42,7 @@ fi
 CONFIG_DIR="$ACTUAL_USER_HOME/.config"
 CONFIG_SOURCE_DIR="$SCRIPT_DIR/config"
 GREETER_STATE_DIR="/var/lib/noctalia-greeter"
+HYPRLAND_SESSION_FILE="/usr/share/wayland-sessions/hyprland.desktop"
 if [[ ! -f "$CONFIG_SOURCE_DIR/hypr/hyprland.lua" ]]; then
     echo "ERROR: Missing $CONFIG_SOURCE_DIR/hypr/hyprland.lua. Clone the repository with its config/ directory before running the installer." >&2
     exit 1
@@ -414,16 +415,19 @@ setup_noctalia_greeter() {
     fi
     session_bin=$(command -v noctalia-greeter-session)
 
+    if ! getent group "$greeter_user" >/dev/null 2>&1; then
+        groupadd --system "$greeter_user" || return 1
+    fi
     if ! id -u "$greeter_user" >/dev/null 2>&1; then
         echo "Creating greeter user '$greeter_user'..."
-        useradd -r -s /usr/bin/nologin -d "$GREETER_STATE_DIR" "$greeter_user" || return 1
+        useradd -r -g "$greeter_user" -s /usr/bin/nologin -d "$GREETER_STATE_DIR" "$greeter_user" || return 1
     fi
 
     echo "Preparing greeter state directory..."
     install -d -m 0750 -o "$greeter_user" -g "$greeter_user" "$GREETER_STATE_DIR" || return 1
 
     if [ -f "$greetd_config_file" ]; then
-        cp -a --backup=numbered "$greetd_config_file" "$greetd_config_file.bak" || return 1
+        cp -aT --backup=numbered "$greetd_config_file" "$greetd_config_file.bak" || return 1
     fi
 
     echo "Writing greetd configuration to $greetd_config_file..."
@@ -442,7 +446,7 @@ EOF
         rm -f "$config_tmp"
         return 1
     fi
-    mv -f "$config_tmp" "$greetd_config_file" || { rm -f "$config_tmp"; return 1; }
+    mv -fT -- "$config_tmp" "$greetd_config_file" || { rm -f "$config_tmp"; return 1; }
 
     if [ -x /usr/share/noctalia-greeter/setup_greetd_pam.sh ]; then
         echo "Configuring greetd PAM integration for Noctalia Greeter..."
@@ -471,18 +475,23 @@ deploy_greeter_config() {
         return 1
     fi
 
+    if [[ -d "$target" && ! -L "$target" ]]; then
+        echo "ERROR: Expected a config file, but $target is a directory." >&2
+        return 1
+    fi
+
     stage_file=$(mktemp "$GREETER_STATE_DIR/.greeter.toml.XXXXXXXX") || return 1
     if ! install -m 0640 -o "$greeter_user" -g "$greeter_user" "$source_file" "$stage_file"; then
         rm -f -- "$stage_file"
         return 1
     fi
     if [[ -e "$target" || -L "$target" ]]; then
-        if ! cp -a --backup=numbered -- "$target" "$target.bak"; then
+        if ! cp -aT --backup=numbered -- "$target" "$target.bak"; then
             rm -f -- "$stage_file"
             return 1
         fi
     fi
-    if ! mv -f -- "$stage_file" "$target"; then
+    if ! mv -fT -- "$stage_file" "$target"; then
         rm -f -- "$stage_file"
         return 1
     fi
@@ -490,6 +499,10 @@ deploy_greeter_config() {
 }
 
 enable_greetd_service() {
+    if [[ ! -f "$HYPRLAND_SESSION_FILE" ]]; then
+        echo "ERROR: Missing $HYPRLAND_SESSION_FILE; refusing to enable greetd or change the boot target." >&2
+        return 1
+    fi
     echo -e "\n--- Display Manager Setup ---"
     echo "Enabling greetd service..."
     if ! systemctl enable greetd; then
@@ -646,6 +659,11 @@ deploy_configs() {
     local config_source_root="$CONFIG_SOURCE_DIR"
     local stage_dir item name target backup
 
+    if [[ ! -d "$config_source_root" || ! -f "$config_source_root/hypr/hyprland.lua" ]]; then
+        echo "ERROR: Missing Hyprland configuration in $config_source_root." >&2
+        return 1
+    fi
+
     sudo -u "$ACTUAL_USER" mkdir -p "$CONFIG_DIR" || return 1
     stage_dir=$(sudo -u "$ACTUAL_USER" mktemp -d "$CONFIG_DIR/.installer-stage.XXXXXXXX") || return 1
     for item in "$config_source_root"/* "$config_source_root"/.[!.]* "$config_source_root"/..?*; do
@@ -670,15 +688,15 @@ deploy_configs() {
                 sudo -u "$ACTUAL_USER" rm -rf -- "$stage_dir"
                 return 1
             fi
-            if ! sudo -u "$ACTUAL_USER" mv -- "$target" "$backup"; then
+            if ! sudo -u "$ACTUAL_USER" mv -T -- "$target" "$backup"; then
                 sudo -u "$ACTUAL_USER" rm -rf -- "$stage_dir"
                 return 1
             fi
             echo "Backed up $name to ${backup##*/}."
         fi
-        if ! sudo -u "$ACTUAL_USER" mv -- "$item" "$target"; then
+        if ! sudo -u "$ACTUAL_USER" mv -T -- "$item" "$target"; then
             if [[ -n "$backup" ]]; then
-                sudo -u "$ACTUAL_USER" mv -- "$backup" "$target"
+                sudo -u "$ACTUAL_USER" mv -T -- "$backup" "$target"
             fi
             sudo -u "$ACTUAL_USER" rm -rf -- "$stage_dir"
             return 1
@@ -806,7 +824,7 @@ copy_backup_configs() {
 }
 
 post_install_hyprland_checks() {
-    local session_file="/usr/share/wayland-sessions/hyprland.desktop"
+    local session_file="$HYPRLAND_SESSION_FILE"
 
     echo -e "\n--- Hyprland Session Sanity Check ---"
 

@@ -27,3 +27,13 @@ Flatpak applications and browsers can be declined; Satty and Starship failures
 produce warnings. A failure to install core packages or deploy the dotfiles
 stops the installer. Keep backups of any existing desktop configuration before
 running.
+
+## Validation
+
+Run `bash tests/installer_smoke.sh` as your normal user before installation.
+The tests use temporary files and mocked system commands to check configuration
+backups, greeter ownership arguments, and failure handling. They require Bash
+and standard Linux command-line utilities; they do not install packages or
+start services. Package availability and the live login session still require
+verification on Fedora. The installer refuses to enable greetd or change the
+boot target if the Hyprland session file is missing.
