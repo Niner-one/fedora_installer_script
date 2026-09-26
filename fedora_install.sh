@@ -40,14 +40,23 @@ if [[ -z "$ACTUAL_USER_HOME" || ! -d "$ACTUAL_USER_HOME" ]]; then
 fi
 
 CONFIG_DIR="$ACTUAL_USER_HOME/.config"
-CONFIG_SOURCE_DIR="$ACTUAL_USER_HOME/config_files"
+CONFIG_SOURCE_DIR="$SCRIPT_DIR/config"
+GREETER_STATE_DIR="/var/lib/noctalia-greeter"
 if [[ ! -f "$CONFIG_SOURCE_DIR/hypr/hyprland.lua" ]]; then
-    echo "ERROR: Missing $CONFIG_SOURCE_DIR/hypr/hyprland.lua. Add the Hyprland dotfiles to ~/config_files before running the installer." >&2
+    echo "ERROR: Missing $CONFIG_SOURCE_DIR/hypr/hyprland.lua. Clone the repository with its config/ directory before running the installer." >&2
+    exit 1
+fi
+if ! sudo -u "$ACTUAL_USER" test -r "$CONFIG_SOURCE_DIR/hypr/hyprland.lua"; then
+    echo "ERROR: User '$ACTUAL_USER' cannot read $CONFIG_SOURCE_DIR. Clone the repository as your normal user." >&2
+    exit 1
+fi
+if [[ -d "$CONFIG_SOURCE_DIR/noctalia-greeter" && ! -f "$CONFIG_SOURCE_DIR/noctalia-greeter/greeter.toml" ]]; then
+    echo "ERROR: Expected $CONFIG_SOURCE_DIR/noctalia-greeter/greeter.toml in the greeter config directory." >&2
     exit 1
 fi
 
 # --- Pre-flight confirmation ---
-echo "This script installs a Hyprland session and copies ~/config_files into ~/.config. Review the changes before proceeding."
+echo "This script installs a Hyprland session and copies $CONFIG_SOURCE_DIR into $CONFIG_DIR. Review the changes before proceeding."
 while true; do
     read -r -p "Would you like to proceed? (y/n): " proceed || exit 1
     case "$proceed" in
@@ -287,12 +296,12 @@ PACKAGES=(
     # --- Desktop applications and screenshot tools ---
     wl-clip-persist                    # Clipboard persistence - started in exec_once
     thunar                              # File manager - SUPER+E
-    thunar-media-tags-plugin		  # Media tags plugin for Thunar
-    thunar-shares-plugin      		# Shares plugin for Thunar
-    thunar-vcs-plugin         		# VCS integration plugin for Thunar
-    thunar-volman             		# Volume management plugin for Thunar
-    tumbler				# Thumbnailer
-    libopenraw				# lib for tumbler:
+    thunar-media-tags-plugin            # Media tags plugin for Thunar
+    thunar-shares-plugin                # Shares plugin for Thunar
+    thunar-vcs-plugin                   # VCS integration plugin for Thunar
+    thunar-volman                       # Volume management plugin for Thunar
+    tumbler                             # Thumbnailer
+    libopenraw                          # RAW image support for Tumbler
     libgsf
     poppler-glib
     ffmpegthumbnailer
@@ -305,8 +314,8 @@ PACKAGES=(
     kitty-shell-integration                   # Kitty shell integration
     kitty-terminfo                              # Kitty terminfo
     jq                                            # JSON parser for Satty release metadata
-    loupe					# Image viewer
-    vlc						# It't fucking VLC
+    loupe                                 # Image viewer
+    vlc                                   # Media player
 
     # --- Utilities ---
     unrar                            # RAR archive support
@@ -318,13 +327,13 @@ PACKAGES=(
     grub2-tools                            # GRUB tooling
     os-prober                               # OS prober for GRUB (dual-boot detection)
     pavucontrol                              # PulseAudio/PipeWire volume control
-    gedit					#Gnome Advanced Text Editor
-    gnome-disk-utility				#Disk Managment
-    gvfs                      			# Needed for Thunar to see drives
-    gvfs-afc                  			# Apple Device Support
-    gvfs-mtp                  			# Android/MTP Device Support
-    gvfs-smb                  			# SMB Support 
-    exfatprogs                			# exFAT filesystem support
+    gedit                                 # Text editor
+    gnome-disk-utility                    # Disk management
+    gvfs                                  # Thunar mount integration
+    gvfs-afc                              # Apple device support
+    gvfs-mtp                              # Android/MTP device support
+    gvfs-smb                              # SMB support
+    exfatprogs                            # exFAT filesystem support
 
     # --- Media and desktop utilities ---
     nwg-look                          # GTK look-and-feel config
@@ -407,12 +416,11 @@ setup_noctalia_greeter() {
 
     if ! id -u "$greeter_user" >/dev/null 2>&1; then
         echo "Creating greeter user '$greeter_user'..."
-        useradd -r -s /usr/bin/nologin -d /var/lib/noctalia-greeter "$greeter_user" || return 1
+        useradd -r -s /usr/bin/nologin -d "$GREETER_STATE_DIR" "$greeter_user" || return 1
     fi
 
     echo "Preparing greeter state directory..."
-    mkdir -p /var/lib/noctalia-greeter || return 1
-    chown -R "$greeter_user:$greeter_user" /var/lib/noctalia-greeter || return 1
+    install -d -m 0750 -o "$greeter_user" -g "$greeter_user" "$GREETER_STATE_DIR" || return 1
 
     if [ -f "$greetd_config_file" ]; then
         cp -a --backup=numbered "$greetd_config_file" "$greetd_config_file.bak" || return 1
@@ -444,6 +452,41 @@ EOF
     else
         echo "Warning: /usr/share/noctalia-greeter/setup_greetd_pam.sh was not found."
     fi
+}
+
+# The greeter reads greeter.toml from its state directory, not the user's ~/.config.
+deploy_greeter_config() {
+    local source_dir="$CONFIG_SOURCE_DIR/noctalia-greeter"
+    local source_file="$source_dir/greeter.toml"
+    local target="$GREETER_STATE_DIR/greeter.toml"
+    local greeter_user="greeter"
+    local stage_file
+
+    if [[ ! -d "$source_dir" ]]; then
+        echo "No custom Noctalia greeter config found; using the package defaults."
+        return 0
+    fi
+    if [[ ! -f "$source_file" ]]; then
+        echo "ERROR: Expected $source_file." >&2
+        return 1
+    fi
+
+    stage_file=$(mktemp "$GREETER_STATE_DIR/.greeter.toml.XXXXXXXX") || return 1
+    if ! install -m 0640 -o "$greeter_user" -g "$greeter_user" "$source_file" "$stage_file"; then
+        rm -f -- "$stage_file"
+        return 1
+    fi
+    if [[ -e "$target" || -L "$target" ]]; then
+        if ! cp -a --backup=numbered -- "$target" "$target.bak"; then
+            rm -f -- "$stage_file"
+            return 1
+        fi
+    fi
+    if ! mv -f -- "$stage_file" "$target"; then
+        rm -f -- "$stage_file"
+        return 1
+    fi
+    echo "Noctalia greeter config deployed to $target."
 }
 
 enable_greetd_service() {
@@ -596,7 +639,7 @@ install_starship() {
     fi
 }
 
-# Deploy configuration files from ~/config_files to ~/.config, backing up originals.
+# Deploy repository dotfiles into ~/.config, backing up originals.
 deploy_configs() {
     echo "Deploying configuration files..."
 
@@ -605,11 +648,15 @@ deploy_configs() {
 
     sudo -u "$ACTUAL_USER" mkdir -p "$CONFIG_DIR" || return 1
     stage_dir=$(sudo -u "$ACTUAL_USER" mktemp -d "$CONFIG_DIR/.installer-stage.XXXXXXXX") || return 1
-    if ! sudo -u "$ACTUAL_USER" cp -a "$config_source_root/." "$stage_dir/"; then
-        echo "ERROR: Failed to stage configuration files." >&2
-        sudo -u "$ACTUAL_USER" rm -rf -- "$stage_dir"
-        return 1
-    fi
+    for item in "$config_source_root"/* "$config_source_root"/.[!.]* "$config_source_root"/..?*; do
+        [[ -e "$item" || -L "$item" ]] || continue
+        [[ ${item##*/} == noctalia-greeter ]] && continue
+        if ! sudo -u "$ACTUAL_USER" cp -a -- "$item" "$stage_dir/"; then
+            echo "ERROR: Failed to stage configuration files." >&2
+            sudo -u "$ACTUAL_USER" rm -rf -- "$stage_dir"
+            return 1
+        fi
+    done
 
     for item in "$stage_dir"/* "$stage_dir"/.[!.]* "$stage_dir"/..?*; do
         [[ -e "$item" || -L "$item" ]] || continue
@@ -798,6 +845,7 @@ install_gaming_packages
 install_bluetooth_packages
 enable_accounts_daemon
 setup_noctalia_greeter || exit 1
+deploy_greeter_config || { echo "ERROR: Greeter configuration deployment failed; installation stopped." >&2; exit 1; }
 
 echo "Updating user directories..."
 sudo -u "$ACTUAL_USER" xdg-user-dirs-update
