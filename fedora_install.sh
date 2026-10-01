@@ -318,6 +318,8 @@ PACKAGES=(
     p7zip                              # 7z archive support
     p7zip-plugins                       # Additional 7z formats
     fastfetch                            # System info display
+    neovim                                # Editor
+    btop                                    # System monitoring
     fish                                  # Shell
     grub2-tools                            # GRUB tooling
     os-prober                               # OS prober for GRUB (dual-boot detection)
