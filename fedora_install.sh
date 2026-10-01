@@ -292,8 +292,6 @@ PACKAGES=(
     # --- Desktop applications and screenshot tools ---
     wl-clip-persist                    # Clipboard persistence - started in exec_once
     thunar                              # File manager - SUPER+E
-    thunar-media-tags-plugin            # Media tags plugin for Thunar
-    thunar-volman                       # Volume management plugin for Thunar
     tumbler                             # Thumbnailer
     libopenraw                          # RAW image support for Tumbler
     libgsf                              # Tumbler libraries for extra functionality:
@@ -333,9 +331,6 @@ PACKAGES=(
 
     # --- Media and desktop utilities ---
     nwg-displays                       # Monitor layout tool
-    gstreamer1-plugins-good              # GStreamer plugins (broad codec/media support)
-    gstreamer1-plugins-ugly               # GStreamer plugins (nonfree codecs, from RPM Fusion)
-    gstreamer1-plugin-libav                # GStreamer plugins (ffmpeg-backed codecs)
     dejavu-sans-fonts                      # Fallback font - kept to avoid missing-glyph rendering
     google-noto-emoji-fonts                 # Emoji fallback font
 )
