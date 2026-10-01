@@ -282,7 +282,6 @@ PACKAGES=(
     qt6-qtbase                    # Qt6 base libraries and tools
     qt6-qtwebsockets               # Websocket support (used by Noctalia)
     qt6ct                          # Qt platform theme
-    matugen                        # Noctalia's wallpaper-based color-scheme generator
     xdg-user-dirs                   # Manage user directories (~/Downloads, ~/Pictures, etc.)
 
     # --- Power management ---
@@ -297,7 +296,7 @@ PACKAGES=(
     thunar-volman                       # Volume management plugin for Thunar
     tumbler                             # Thumbnailer
     libopenraw                          # RAW image support for Tumbler
-    libgsf
+    libgsf                              # Tumbler libraries for extra functionality:
     poppler-glib
     ffmpegthumbnailer
     freetype
