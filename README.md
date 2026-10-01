@@ -12,13 +12,11 @@ directory you run it from. Review the dotfiles, especially hardware-specific
 settings and commands in `config/hypr/startup.lua`, before installation. GTK
 bookmarks are created for the target user during installation.
 
-The bundled login greeter configuration is `config/noctalia-greeter/greeter.toml`.
-The installer places it at `/var/lib/noctalia-greeter/greeter.toml` with
-`greeter:greeter` ownership and `0640` permissions. It backs up an existing file
-as `greeter.toml.bak`, retaining older backups with numbered suffixes. The
-`noctalia-greeter/` directory is excluded from the user's `~/.config`
-installation. If the source directory is absent, the existing greeter
-configuration is left in place; a present directory must contain `greeter.toml`.
+The installer does not install a custom Noctalia greeter configuration. Existing
+`greeter.toml` settings are left in place; otherwise the package defaults apply.
+The bundled `config/noctalia-greeter/greeter.toml` is available for manual use.
+The `config/noctalia-greeter/` directory is excluded from the user's `~/.config`
+installation.
 
 On a Fedora system, run the cloned script from your regular account with
 `sudo bash /path/to/fedora_installer_script/fedora_install.sh`. The script needs `dnf` with COPR
