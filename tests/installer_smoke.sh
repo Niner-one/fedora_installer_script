@@ -53,24 +53,17 @@ fi
 grep -qE 'cannot read .*/clone/config' "$scratch/out"
 chmod 644 "$scratch/clone/config/hypr/hyprland.lua"
 mkdir -p "$scratch/clone/config/noctalia-greeter"
-if (cd "$scratch" && bash "$scratch/clone/preflight.sh") > "$scratch/out" 2>&1; then
-    echo 'Incomplete greeter config must fail preflight' >&2; exit 1
-fi
-grep -qE 'Expected .*/clone/config/noctalia-greeter/greeter.toml' "$scratch/out"
-cp -- "$repo_dir/config/noctalia-greeter/greeter.toml" "$scratch/clone/config/noctalia-greeter/greeter.toml"
 (cd "$scratch" && bash "$scratch/clone/preflight.sh")
-echo 'PASS: preflight uses clone config from another directory and rejects unreadable or incomplete config'
+echo 'PASS: preflight uses clone config from another directory and rejects missing or unreadable Hyprland config'
 
 # shellcheck source=/dev/null
 source <(sed -n '/^deploy_configs() {/,/^}/p' "$repo_dir/fedora_install.sh")
-# shellcheck source=/dev/null
-source <(sed -n '/^deploy_greeter_config() {/,/^}/p' "$repo_dir/fedora_install.sh")
 CONFIG_SOURCE_DIR="$scratch/clone/config"
 CONFIG_DIR="$scratch/home/.config"
 ACTUAL_USER=$(id -un)
 export ACTUAL_USER
 GREETER_STATE_DIR="$scratch/greeter-state"
-mkdir -p "$CONFIG_DIR/hypr" "$GREETER_STATE_DIR"
+mkdir -p "$CONFIG_DIR/hypr"
 printf 'old\n' > "$CONFIG_DIR/hypr/startup.lua"
 printf 'new\n' > "$CONFIG_SOURCE_DIR/hypr/startup.lua"
 deploy_configs > /dev/null
@@ -82,33 +75,6 @@ if compgen -G "$CONFIG_DIR/.installer-stage.*" > /dev/null; then
 fi
 echo 'PASS: user dotfiles deploy with backup and greeter files stay out of ~/.config'
 
-# Mock only ownership changes (the real installer runs this as root).
-install() {
-    local args=() owner_seen=0 group_seen=0
-    while (($#)); do
-        case "$1" in
-            -o) [[ "$2" == greeter ]] || return 1; owner_seen=1; shift 2 ;;
-            -g) [[ "$2" == greeter ]] || return 1; group_seen=1; shift 2 ;;
-            *) args+=("$1"); shift ;;
-        esac
-    done
-    [[ "$owner_seen" == 1 && "$group_seen" == 1 ]] || return 1
-    command install "${args[@]}"
-}
-mv -- "$CONFIG_SOURCE_DIR/noctalia-greeter" "$scratch/custom-greeter"
-deploy_greeter_config > /dev/null
-[[ ! -e "$GREETER_STATE_DIR/greeter.toml" ]]
-mv -- "$scratch/custom-greeter" "$CONFIG_SOURCE_DIR/noctalia-greeter"
-deploy_greeter_config > /dev/null
-cmp -- "$repo_dir/config/noctalia-greeter/greeter.toml" "$GREETER_STATE_DIR/greeter.toml"
-[[ $(stat -c %a "$GREETER_STATE_DIR/greeter.toml") == 640 ]]
-printf 'theme = "updated"\n' > "$CONFIG_SOURCE_DIR/noctalia-greeter/greeter.toml"
-deploy_greeter_config > /dev/null
-[[ $(cat "$GREETER_STATE_DIR/greeter.toml") == 'theme = "updated"' ]]
-cmp -- "$repo_dir/config/noctalia-greeter/greeter.toml" "$GREETER_STATE_DIR/greeter.toml.bak"
-[[ ! -e "$CONFIG_DIR/noctalia-greeter" ]]
-echo 'PASS: bundled greeter config deploys with greeter ownership arguments, 0640 permissions and backup'
-
 # A source lost after preflight must not report a successful deployment.
 mv -- "$CONFIG_SOURCE_DIR" "$scratch/saved-config"
 if deploy_configs > "$scratch/out" 2>&1; then
@@ -117,24 +83,6 @@ fi
 [[ $(cat "$CONFIG_DIR/hypr/startup.lua") == new ]]
 mv -- "$scratch/saved-config" "$CONFIG_SOURCE_DIR"
 echo 'PASS: missing source fails without replacing installed user config'
-
-# A directory at the file destination must not silently receive a nested config.
-rm -- "$GREETER_STATE_DIR/greeter.toml"
-mkdir -- "$GREETER_STATE_DIR/greeter.toml"
-if deploy_greeter_config > "$scratch/out" 2>&1; then
-    echo 'Directory at greeter config destination must fail' >&2; exit 1
-fi
-[[ -z $(ls -A "$GREETER_STATE_DIR/greeter.toml") ]]
-rmdir -- "$GREETER_STATE_DIR/greeter.toml"
-
-# A symlink at the destination is replaced without touching its referent.
-printf 'external config\n' > "$scratch/external-config"
-ln -s -- "$scratch/external-config" "$GREETER_STATE_DIR/greeter.toml"
-deploy_greeter_config > /dev/null
-[[ ! -L "$GREETER_STATE_DIR/greeter.toml" ]]
-[[ $(cat "$scratch/external-config") == 'external config' ]]
-[[ $(cat "$GREETER_STATE_DIR/greeter.toml") == 'theme = "updated"' ]]
-echo 'PASS: greeter destination directories fail and symlinks are replaced safely'
 
 # Missing sessions and failed service enablement must not change the boot target.
 # shellcheck source=/dev/null

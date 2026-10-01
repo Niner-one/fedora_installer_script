@@ -51,10 +51,6 @@ if ! sudo -u "$ACTUAL_USER" test -r "$CONFIG_SOURCE_DIR/hypr/hyprland.lua"; then
     echo "ERROR: User '$ACTUAL_USER' cannot read $CONFIG_SOURCE_DIR. Clone the repository as your normal user." >&2
     exit 1
 fi
-if [[ -d "$CONFIG_SOURCE_DIR/noctalia-greeter" && ! -f "$CONFIG_SOURCE_DIR/noctalia-greeter/greeter.toml" ]]; then
-    echo "ERROR: Expected $CONFIG_SOURCE_DIR/noctalia-greeter/greeter.toml in the greeter config directory." >&2
-    exit 1
-fi
 
 # --- Pre-flight confirmation ---
 echo "This script installs a Hyprland session and copies $CONFIG_SOURCE_DIR into $CONFIG_DIR. Review the changes before proceeding."
@@ -456,46 +452,6 @@ EOF
     fi
 }
 
-# The greeter reads greeter.toml from its state directory, not the user's ~/.config.
-deploy_greeter_config() {
-    local source_dir="$CONFIG_SOURCE_DIR/noctalia-greeter"
-    local source_file="$source_dir/greeter.toml"
-    local target="$GREETER_STATE_DIR/greeter.toml"
-    local greeter_user="greeter"
-    local stage_file
-
-    if [[ ! -d "$source_dir" ]]; then
-        echo "No custom Noctalia greeter config found; using the package defaults."
-        return 0
-    fi
-    if [[ ! -f "$source_file" ]]; then
-        echo "ERROR: Expected $source_file." >&2
-        return 1
-    fi
-
-    if [[ -d "$target" && ! -L "$target" ]]; then
-        echo "ERROR: Expected a config file, but $target is a directory." >&2
-        return 1
-    fi
-
-    stage_file=$(mktemp "$GREETER_STATE_DIR/.greeter.toml.XXXXXXXX") || return 1
-    if ! install -m 0640 -o "$greeter_user" -g "$greeter_user" "$source_file" "$stage_file"; then
-        rm -f -- "$stage_file"
-        return 1
-    fi
-    if [[ -e "$target" || -L "$target" ]]; then
-        if ! cp -aT --backup=numbered -- "$target" "$target.bak"; then
-            rm -f -- "$stage_file"
-            return 1
-        fi
-    fi
-    if ! mv -fT -- "$stage_file" "$target"; then
-        rm -f -- "$stage_file"
-        return 1
-    fi
-    echo "Noctalia greeter config deployed to $target."
-}
-
 enable_greetd_service() {
     if [[ ! -f "$HYPRLAND_SESSION_FILE" ]]; then
         echo "ERROR: Missing $HYPRLAND_SESSION_FILE; refusing to enable greetd or change the boot target." >&2
@@ -666,6 +622,7 @@ deploy_configs() {
     stage_dir=$(sudo -u "$ACTUAL_USER" mktemp -d "$CONFIG_DIR/.installer-stage.XXXXXXXX") || return 1
     for item in "$config_source_root"/* "$config_source_root"/.[!.]* "$config_source_root"/..?*; do
         [[ -e "$item" || -L "$item" ]] || continue
+        # Greeter configs are managed separately from user dotfiles.
         [[ ${item##*/} == noctalia-greeter ]] && continue
         if ! sudo -u "$ACTUAL_USER" cp -a -- "$item" "$stage_dir/"; then
             echo "ERROR: Failed to stage configuration files." >&2
@@ -861,7 +818,6 @@ install_gaming_packages
 install_bluetooth_packages
 enable_accounts_daemon
 setup_noctalia_greeter || exit 1
-deploy_greeter_config || { echo "ERROR: Greeter configuration deployment failed; installation stopped." >&2; exit 1; }
 
 echo "Updating user directories..."
 sudo -u "$ACTUAL_USER" xdg-user-dirs-update
