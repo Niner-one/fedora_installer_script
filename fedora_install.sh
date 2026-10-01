@@ -297,10 +297,10 @@ PACKAGES=(
     tumbler                             # Thumbnailer
     libopenraw                          # RAW image support for Tumbler
     libgsf                              # Tumbler libraries for extra functionality:
-    poppler-glib
-    ffmpegthumbnailer
-    freetype
-    libgepub
+    poppler-glib                        #
+    ffmpegthumbnailer                    #
+    freetype                                #
+    libgepub                                #
     grim                                  # Screenshot capture - used by both hyprshot and satty.sh
     slurp                                  # Region selector - used by both hyprshot and satty.sh
     hyprshot                                # SUPER+PrintScreen / Alt+PrintScreen / Shift+PrintScreen
@@ -332,7 +332,6 @@ PACKAGES=(
     exfatprogs                            # exFAT filesystem support
 
     # --- Media and desktop utilities ---
-    nwg-look                          # GTK look-and-feel config
     nwg-displays                       # Monitor layout tool
     gstreamer1-plugins-good              # GStreamer plugins (broad codec/media support)
     gstreamer1-plugins-ugly               # GStreamer plugins (nonfree codecs, from RPM Fusion)
