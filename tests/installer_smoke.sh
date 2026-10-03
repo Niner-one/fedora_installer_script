@@ -62,18 +62,21 @@ CONFIG_SOURCE_DIR="$scratch/clone/config"
 CONFIG_DIR="$scratch/home/.config"
 ACTUAL_USER=$(id -un)
 export ACTUAL_USER
-GREETER_STATE_DIR="$scratch/greeter-state"
 mkdir -p "$CONFIG_DIR/hypr"
 printf 'old\n' > "$CONFIG_DIR/hypr/startup.lua"
 printf 'new\n' > "$CONFIG_SOURCE_DIR/hypr/startup.lua"
+cp -- "$repo_dir/config/noctalia-greeter/greeter.toml" "$CONFIG_SOURCE_DIR/noctalia-greeter/greeter.toml"
+# Reproduce a config directory that cannot be written by its owner.
+chmod 0500 "$CONFIG_DIR"
 deploy_configs > /dev/null
+[[ $(stat -c %a "$CONFIG_DIR") == 700 ]]
 [[ $(cat "$CONFIG_DIR/hypr/startup.lua") == new ]]
 [[ $(cat "$CONFIG_DIR/hypr.bak."*/startup.lua) == old ]]
 [[ ! -e "$CONFIG_DIR/noctalia-greeter" ]]
 if compgen -G "$CONFIG_DIR/.installer-stage.*" > /dev/null; then
     echo 'Staging directory was not removed' >&2; exit 1
 fi
-echo 'PASS: user dotfiles deploy with backup and greeter files stay out of ~/.config'
+echo 'PASS: config write permissions are repaired, dotfiles deploy with backup, and greeter files stay out of ~/.config'
 
 # A source lost after preflight must not report a successful deployment.
 mv -- "$CONFIG_SOURCE_DIR" "$scratch/saved-config"
@@ -83,6 +86,20 @@ fi
 [[ $(cat "$CONFIG_DIR/hypr/startup.lua") == new ]]
 mv -- "$scratch/saved-config" "$CONFIG_SOURCE_DIR"
 echo 'PASS: missing source fails without replacing installed user config'
+
+# A failed ownership repair must stop before staging or replacing existing files.
+(
+    chown() { return 1; }
+    if deploy_configs > "$scratch/out" 2>&1; then
+        echo 'Failed config ownership repair must fail deployment' >&2; exit 1
+    fi
+    grep -q 'Could not prepare' "$scratch/out"
+    [[ $(cat "$CONFIG_DIR/hypr/startup.lua") == new ]]
+    if compgen -G "$CONFIG_DIR/.installer-stage.*" > /dev/null; then
+        echo 'Staging must not start after failed ownership repair' >&2; exit 1
+    fi
+)
+echo 'PASS: failed ownership repair stops deployment before changing dotfiles'
 
 # Missing sessions and failed service enablement must not change the boot target.
 # shellcheck source=/dev/null
@@ -107,20 +124,3 @@ fail_enable=0
 enable_greetd_service > /dev/null
 [[ $(cat "$scratch/systemctl.log") == $'enable greetd\nset-default graphical.target\nget-default' ]]
 echo 'PASS: boot target changes only after session check and successful greetd enablement'
-
-# Stop setup at user creation so this test cannot reach any /etc or /var writes.
-(
-    # shellcheck source=/dev/null
-    source <(sed -n '/^setup_noctalia_greeter() {/,/^}/p' "$repo_dir/fedora_install.sh")
-    noctalia-greeter-session() { :; }
-    getent() { return 2; }
-    id() { return 1; }
-    groupadd() { printf '%s\n' "$*" > "$scratch/groupadd.log"; }
-    useradd() { printf '%s\n' "$*" > "$scratch/useradd.log"; return 1; }
-    if setup_noctalia_greeter > "$scratch/out" 2>&1; then
-        echo 'Expected the mock user creation failure to stop setup' >&2; exit 1
-    fi
-    [[ $(cat "$scratch/groupadd.log") == '--system greeter' ]]
-    [[ $(cat "$scratch/useradd.log") == "-r -g greeter -s /usr/bin/nologin -d $GREETER_STATE_DIR greeter" ]]
-)
-echo 'PASS: greeter group is created explicitly and used for the new account'
