@@ -41,7 +41,6 @@ fi
 
 CONFIG_DIR="$ACTUAL_USER_HOME/.config"
 CONFIG_SOURCE_DIR="$SCRIPT_DIR/config"
-GREETER_STATE_DIR="/var/lib/noctalia-greeter"
 HYPRLAND_SESSION_FILE="/usr/share/wayland-sessions/hyprland.desktop"
 if [[ ! -f "$CONFIG_SOURCE_DIR/hypr/hyprland.lua" ]]; then
     echo "ERROR: Missing $CONFIG_SOURCE_DIR/hypr/hyprland.lua. Clone the repository with its config/ directory before running the installer." >&2
@@ -386,72 +385,6 @@ ensure_flatpak_available() {
     return 1
 }
 
-enable_accounts_daemon() {
-    echo -e "\n--- AccountsService Setup ---"
-    echo "Enabling accounts-daemon service..."
-    if systemctl enable accounts-daemon; then
-        echo "accounts-daemon service enabled."
-    else
-        echo "Warning: Failed to enable accounts-daemon.service."
-    fi
-}
-
-setup_noctalia_greeter() {
-    echo -e "\n--- Noctalia Greeter Setup ---"
-
-    local greetd_config_file="/etc/greetd/config.toml"
-    local greeter_user="greeter"
-    local session_bin="/usr/bin/noctalia-greeter-session"
-
-    if ! command -v noctalia-greeter-session >/dev/null 2>&1; then
-        echo "ERROR: noctalia-greeter-session is missing; refusing to configure greetd." >&2
-        return 1
-    fi
-    session_bin=$(command -v noctalia-greeter-session)
-
-    if ! getent group "$greeter_user" >/dev/null 2>&1; then
-        groupadd --system "$greeter_user" || return 1
-    fi
-    if ! id -u "$greeter_user" >/dev/null 2>&1; then
-        echo "Creating greeter user '$greeter_user'..."
-        useradd -r -g "$greeter_user" -s /usr/bin/nologin -d "$GREETER_STATE_DIR" "$greeter_user" || return 1
-    fi
-
-    echo "Preparing greeter state directory..."
-    install -d -m 0750 -o "$greeter_user" -g "$greeter_user" "$GREETER_STATE_DIR" || return 1
-
-    if [ -f "$greetd_config_file" ]; then
-        cp -aT --backup=numbered "$greetd_config_file" "$greetd_config_file.bak" || return 1
-    fi
-
-    echo "Writing greetd configuration to $greetd_config_file..."
-    mkdir -p /etc/greetd || return 1
-    local config_tmp
-    config_tmp=$(mktemp /etc/greetd/config.toml.XXXXXXXX) || return 1
-    if ! cat > "$config_tmp" <<EOF
-[terminal]
-vt = 1
-
-[default_session]
-command = "$session_bin"
-user = "$greeter_user"
-EOF
-    then
-        rm -f "$config_tmp"
-        return 1
-    fi
-    mv -fT -- "$config_tmp" "$greetd_config_file" || { rm -f "$config_tmp"; return 1; }
-
-    if [ -x /usr/share/noctalia-greeter/setup_greetd_pam.sh ]; then
-        echo "Configuring greetd PAM integration for Noctalia Greeter..."
-        if ! bash /usr/share/noctalia-greeter/setup_greetd_pam.sh; then
-            echo "Warning: greetd PAM setup failed."
-        fi
-    else
-        echo "Warning: /usr/share/noctalia-greeter/setup_greetd_pam.sh was not found."
-    fi
-}
-
 enable_greetd_service() {
     if [[ ! -f "$HYPRLAND_SESSION_FILE" ]]; then
         echo "ERROR: Missing $HYPRLAND_SESSION_FILE; refusing to enable greetd or change the boot target." >&2
@@ -618,7 +551,14 @@ deploy_configs() {
         return 1
     fi
 
-    sudo -u "$ACTUAL_USER" mkdir -p "$CONFIG_DIR" || return 1
+    # Repair the parent directory before staging as the user. Preserve child ownership
+    # and existing group/other permissions, including a private ~/.config mode.
+    if ! mkdir -p -- "$CONFIG_DIR" ||
+        ! chown -- "$ACTUAL_USER" "$CONFIG_DIR" ||
+        ! chmod u+rwx -- "$CONFIG_DIR"; then
+        echo "ERROR: Could not prepare $CONFIG_DIR for user '$ACTUAL_USER'." >&2
+        return 1
+    fi
     stage_dir=$(sudo -u "$ACTUAL_USER" mktemp -d "$CONFIG_DIR/.installer-stage.XXXXXXXX") || return 1
     for item in "$config_source_root"/* "$config_source_root"/.[!.]* "$config_source_root"/..?*; do
         [[ -e "$item" || -L "$item" ]] || continue
@@ -816,8 +756,6 @@ fi
 
 install_gaming_packages
 install_bluetooth_packages
-enable_accounts_daemon
-setup_noctalia_greeter || exit 1
 
 echo "Updating user directories..."
 sudo -u "$ACTUAL_USER" xdg-user-dirs-update
